@@ -10,6 +10,7 @@ from aif360.metrics import ClassificationMetric
 from sklearn.base import clone
 from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import train_test_split
+from fp.missingvalue_handlers import MissingValueMethodDispatcher
 
 
 class BinaryClassificationExperiment:
@@ -46,7 +47,9 @@ class BinaryClassificationExperiment:
         self.categorical_attribute_names = categorical_attribute_names
         self.attributes_to_drop_names = attributes_to_drop_names
         self.train_data_sampler = train_data_sampler
-        self.missing_value_handler = missing_value_handler
+
+        self.missing_value_handler_toprepare = missing_value_handler
+        
         self.numeric_attribute_scaler = numeric_attribute_scaler
         self.learners = learners
         self.pre_processors = pre_processors
@@ -342,6 +345,7 @@ class BinaryClassificationExperiment:
         validation_data, test_data = train_test_split(test_and_validation_data, test_size=second_split_ratio,
                                                       random_state=self.fixed_random_seed)
 
+        self.missing_value_handler = MissingValueMethodDispatcher(self.missing_value_handler_toprepare, train_data)
         self.missing_value_handler.fit(train_data)
         filtered_train_data = self.missing_value_handler.handle_missing(train_data)
 
