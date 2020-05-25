@@ -1,1 +1,1 @@
-__all__ = ['experiments', 'dataset_experiments', 'missingvalue_handlers', 'traindata_samplers', 'learners']
+__all__ = ['experiments', 'dataset_experiments', 'missingvalue_handlers', 'traindata_samplers', 'learners', "data_utils"]
