@@ -450,7 +450,7 @@ class PSIDDataset(BinaryClassificationExperiment):
         ### Process the data according to what we need.
 
         # Transform the classification attribute into a binary one.
-        data["intermediate"] = data[self.label_name].copy()
+        data["intermediate"] = data[self.label_name].copy(deep=True)
         data.loc[data[self.label_name] <= self.threshold_value,"intermediate"] = self.negative_label
         data.loc[data[self.label_name] > self.threshold_value, "intermediate"] = self.positive_label
         data = data.drop(self.label_name, 1)

@@ -33,7 +33,8 @@ class MissingValueMethodDispatcher:
             raise "Error: missing value method not applicable to given attributes."
 
     def name(self):
-        return "numerical_categorical_dispatcher"
+        name_ = "numerical_categorical_dispatcher_" + self.missing_value_handler_numerical.name() + "_" + self.missing_value_handler_categorical.name()
+        return name_
 
     def fit(self, df):
         num_df = df.select_dtypes(include='number')

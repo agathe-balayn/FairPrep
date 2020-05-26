@@ -11,6 +11,7 @@ from sklearn.base import clone
 from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import train_test_split
 from fp.missingvalue_handlers import MissingValueMethodDispatcher
+from fp.datadistribution_observer import getDataErrorDistributions
 
 
 class BinaryClassificationExperiment:
@@ -49,7 +50,7 @@ class BinaryClassificationExperiment:
         self.train_data_sampler = train_data_sampler
 
         self.missing_value_handler_toprepare = missing_value_handler
-        
+
         self.numeric_attribute_scaler = numeric_attribute_scaler
         self.learners = learners
         self.pre_processors = pre_processors
@@ -76,6 +77,11 @@ class BinaryClassificationExperiment:
                                                    self.numeric_attribute_scaler.name(),
                                                    pre_processor.name(),
                                                    post_processor.name())
+
+    def unique_file_name_before_exp(self):
+        return '{}__{}__{}'.format(self.dataset_name,                                                   
+                                                   self.train_data_sampler.name(),
+                                                   self.numeric_attribute_scaler.name())
 
 
     def generate_file_path(self, file_name=''):
@@ -290,14 +296,15 @@ class BinaryClassificationExperiment:
 
         # Fetching the accuracy from the row('val', 'None', 'accuracy') of all the experiment results
         for result_filename in results_dir:
-            file_path = self.generate_file_path(result_filename)
-            result_df = pd.read_csv(file_path, header=None, names=['split', 'maybe_privileged', 'metric_name', 'metric_value'])
-            accuracy = (result_df.loc[(result_df['split'] == 'val') & 
-                                      (result_df['maybe_privileged'] == 'None') & 
-                                      (result_df['metric_name'] == 'accuracy'), 'metric_value'].values[0])
-            accuracies[result_filename] = accuracy
-            if accuracy > max_accuracy:
-                max_accuracy = accuracy
+            if "distribution" not in result_filename:
+                file_path = self.generate_file_path(result_filename)
+                result_df = pd.read_csv(file_path, header=None, names=['split', 'maybe_privileged', 'metric_name', 'metric_value'])
+                accuracy = (result_df.loc[(result_df['split'] == 'val') & 
+                                          (result_df['maybe_privileged'] == 'None') & 
+                                          (result_df['metric_name'] == 'accuracy'), 'metric_value'].values[0])
+                accuracies[result_filename] = accuracy
+                if accuracy > max_accuracy:
+                    max_accuracy = accuracy
 
         # List of non optimal and optimal filenames and accuracy
         non_optimal_filenames = list()
@@ -338,7 +345,27 @@ class BinaryClassificationExperiment:
                                                                     self.validation_set_ratio,
                                                                     random_state=self.fixed_random_seed)
 
+        
+        results_file_name_distri = '../{}{}-{}-{}.csv'.format(
+            self.generate_file_path(), self.unique_file_name_before_exp(), self.fixed_random_seed, "raw_training_data_distribution")
+        results_file_path_distri = os.path.join(os.path.dirname(os.path.realpath(__file__)), results_file_name_distri)
+        
+        results_dir_name = os.path.join(os.path.dirname(os.path.realpath(__file__)), '../{}'.format(self.generate_file_path()))
+        if not os.path.exists(results_dir_name):
+            os.makedirs(results_dir_name)
+
+        #with open(results_file_path, 'w') as results_file:
+        getDataErrorDistributions(all_train_data.copy(deep=True), self.protected_attribute_names, self.attributes_to_drop_names, self.privileged_groups, self.label_name, results_file_path_distri, ["missing_values"])
+
+
+        results_file_name_distri = '../{}{}-{}-{}.csv'.format(
+            self.generate_file_path(), self.unique_file_name_before_exp(), self.fixed_random_seed, "raw_training_data_sampled_distribution")
+        results_file_path_distri = os.path.join(os.path.dirname(os.path.realpath(__file__)), results_file_name_distri)
+        
         train_data = self.train_data_sampler.sample(all_train_data)
+
+        #with open(results_file_path, 'w') as results_file:
+        getDataErrorDistributions(train_data, self.protected_attribute_names, self.attributes_to_drop_names, self.privileged_groups, self.label_name, results_file_path_distri,["missing_values"])
 
         second_split_ratio = self.test_set_ratio / (self.test_set_ratio + self.validation_set_ratio)
 
@@ -369,7 +396,7 @@ class BinaryClassificationExperiment:
             protected_attribute_names=self.protected_attribute_names,
             privileged_classes=self.privileged_classes,
             categorical_features=self.categorical_attribute_names,
-            features_to_drop=self.attributes_to_drop_names,
+            features_to_drop=self.attributes_to_drop_names, # + self.protected_attribute_names,
             metadata=self.dataset_metadata
         )
 
