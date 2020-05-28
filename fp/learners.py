@@ -32,9 +32,7 @@ class LogisticRegression(Learner):
         search = GridSearchCV(pipeline, param_grid, scoring='roc_auc', cv=5, verbose=1, n_jobs=-1)
 
         fit_params = {'learner__sample_weight': annotated_train_data.instance_weights}        
-
-        model = search.fit(annotated_train_data.features, annotated_train_data.labels, **fit_params)
-
+        model = search.fit(annotated_train_data.training_features, annotated_train_data.labels, **fit_params) #### I change for train without protected!!!.
         return model
 
     def name(self):

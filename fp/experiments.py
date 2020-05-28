@@ -135,31 +135,32 @@ class BinaryClassificationExperiment:
 
         adjusted_annotated_data = self.preprocess_data(pre_processor, annotated_data)
 
-        train_feature_names = adjusted_annotated_train_data.feature_names
-        current_feature_names = adjusted_annotated_data.feature_names
+        train_feature_names = adjusted_annotated_train_data.training_feature_names #### Change for train without prot
+        current_feature_names = adjusted_annotated_data.training_feature_names #### Change for train without prot
 
         feature_names_in_train_but_not_in_current = set(train_feature_names).difference(
             set(current_feature_names))
 
         print("Injecting zero columns for features not present", feature_names_in_train_but_not_in_current)
 
-        validation_data_df, _ = adjusted_annotated_data.convert_to_dataframe()
+        validation_data_df, validation_data_training_df, _ = adjusted_annotated_data.convert_to_dataframe() # Changed
 
         for feature_name in feature_names_in_train_but_not_in_current:
-            validation_data_df.loc[:, feature_name] = 0.0
-
-        adjusted_annotated_data.feature_names = train_feature_names
-        adjusted_annotated_data.features = validation_data_df[train_feature_names].values.copy()
+            validation_data_training_df.loc[:, feature_name] = 0.0 # Changed
+ 
+        adjusted_annotated_data.training_feature_names = train_feature_names
+        adjusted_annotated_data.training_features = validation_data_training_df[train_feature_names].values.copy() #### Change for train without prot
 
         adjusted_annotated__data_with_predictions = adjusted_annotated_data.copy()
 
         if learner.needs_annotated_data_for_prediction():
             adjusted_annotated__data_with_predictions = model.predict(adjusted_annotated_data)
         else:
-            adjusted_annotated__data_with_predictions.labels = model.predict(adjusted_annotated_data.features)
-
+            adjusted_annotated__data_with_predictions.labels = model.predict(adjusted_annotated_data.training_features)#### Change for train without prot
+            print(type(adjusted_annotated__data_with_predictions))
+            print(type(adjusted_annotated_data))
             try:
-                class_probs = model.predict_proba(adjusted_annotated_data.features)
+                class_probs = model.predict_proba(adjusted_annotated_data.training_features)#### Change for train without prot
                 adjusted_annotated__data_with_predictions.scores = class_probs[:, 0]
             except AttributeError:
                 print("WARNING: MODEL CANNOT ASSIGN CLASS PROBABILITIES")
@@ -190,7 +191,7 @@ class BinaryClassificationExperiment:
                 results_file.write('{},{},{},{}\n'.format(prefix, maybe_privileged, metric_name, metric_value))
 
         if hasattr(model, 'predict_proba'):
-            auc = roc_auc_score(annotated_data.labels, model.predict_proba(annotated_data.features)[:, 1])
+            auc = roc_auc_score(annotated_data.labels, model.predict_proba(annotated_data.training_features)[:, 1])
         else:
             auc = None
 
@@ -253,7 +254,7 @@ class BinaryClassificationExperiment:
                 adjusted_annotated_train_data_with_predictions)
         else:
             adjusted_annotated_train_data_with_predictions.labels = model.predict(
-                adjusted_annotated_train_data_with_predictions.features)
+                adjusted_annotated_train_data_with_predictions.training_features) # Adapted for prot not in eval
 
         adjusted_annotated_validation_data, adjusted_annotated_validation_data_with_predictions = \
             self.apply_model(validation_data, scalers, adjusted_annotated_train_data, pre_processor, learner, model)
@@ -276,10 +277,11 @@ class BinaryClassificationExperiment:
 
         with open(results_file_path, 'w') as results_file:
 
-            self.log_metrics(results_file, model, adjusted_annotated_validation_data,
-                             adjusted_annotated_validation_data_with_predictions, 'val')
             self.log_metrics(results_file, model, adjusted_annotated_train_data,
                              adjusted_annotated_train_data_with_predictions, 'train')
+            self.log_metrics(results_file, model, adjusted_annotated_validation_data,
+                             adjusted_annotated_validation_data_with_predictions, 'val')
+            
             self.log_metrics(results_file, model, adjusted_annotated_test_data,
                              adjusted_annotated_test_data_with_predictions, 'test')
 
@@ -349,21 +351,18 @@ class BinaryClassificationExperiment:
         results_file_name_distri = '../{}{}-{}-{}.csv'.format(
             self.generate_file_path(), self.unique_file_name_before_exp(), self.fixed_random_seed, "raw_training_data_distribution")
         results_file_path_distri = os.path.join(os.path.dirname(os.path.realpath(__file__)), results_file_name_distri)
-        
         results_dir_name = os.path.join(os.path.dirname(os.path.realpath(__file__)), '../{}'.format(self.generate_file_path()))
         if not os.path.exists(results_dir_name):
             os.makedirs(results_dir_name)
-
         #with open(results_file_path, 'w') as results_file:
         getDataErrorDistributions(all_train_data.copy(deep=True), self.protected_attribute_names, self.attributes_to_drop_names, self.privileged_groups, self.label_name, results_file_path_distri, ["missing_values"])
 
+        train_data = self.train_data_sampler.sample(all_train_data)
+        #print(train_data["eval_sprace"].value_counts(dropna=False))
 
         results_file_name_distri = '../{}{}-{}-{}.csv'.format(
             self.generate_file_path(), self.unique_file_name_before_exp(), self.fixed_random_seed, "raw_training_data_sampled_distribution")
         results_file_path_distri = os.path.join(os.path.dirname(os.path.realpath(__file__)), results_file_name_distri)
-        
-        train_data = self.train_data_sampler.sample(all_train_data)
-
         #with open(results_file_path, 'w') as results_file:
         getDataErrorDistributions(train_data, self.protected_attribute_names, self.attributes_to_drop_names, self.privileged_groups, self.label_name, results_file_path_distri,["missing_values"])
 
@@ -372,12 +371,14 @@ class BinaryClassificationExperiment:
         validation_data, test_data = train_test_split(test_and_validation_data, test_size=second_split_ratio,
                                                       random_state=self.fixed_random_seed)
 
-        self.missing_value_handler = MissingValueMethodDispatcher(self.missing_value_handler_toprepare, train_data)
+        self.missing_value_handler = MissingValueMethodDispatcher(self.missing_value_handler_toprepare, train_data, self.missing_value_per_protected_class, self.protected_attribute_names)
         self.missing_value_handler.fit(train_data)
         filtered_train_data = self.missing_value_handler.handle_missing(train_data)
 
         print(self.missing_value_handler.name(), 'removed', len(train_data) - len(filtered_train_data),
               'instances from training data')
+
+        #print(filtered_train_data["eval_sprace"].value_counts(dropna=False))
 
         scalers = {}
 
@@ -388,7 +389,7 @@ class BinaryClassificationExperiment:
 
             filtered_train_data.loc[:, numerical_attribute] = scaled_numerical_attribute_data
             scalers[numerical_attribute] = scaler
-
+        #print(filtered_train_data.head())
         annotated_train_data = StandardDataset(
             df=filtered_train_data,
             label_name=self.label_name,

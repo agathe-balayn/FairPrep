@@ -1,10 +1,30 @@
 from sklearn.impute import SimpleImputer
 import numpy as np
 import datawig
+import copy
 import pandas as pd
 
 class MissingValueMethodDispatcher:
-    def __init__(self, method_list, data):
+    def __init__(self, method_list, data, handle_protected=False, protected_att=[]):
+        
+        self.handle_protected = handle_protected
+        if self.handle_protected:
+            self.protected_att_list = protected_att
+            # There might be multiple protected attributes. We need to merge them all to handle only one binary protected / nonprotected scenario.
+
+            self.protected_att = "_".join(protected_att)
+            data_to_compute = data.copy(deep=True)
+            #print((data_to_compute[protected_att].values.astype(str).tolist()))
+            #print("_".join(data_to_compute[protected_att].values.astype(str).tolist()))
+            #data_to_compute[self.protected_att] = "_".join(data_to_compute[protected_att].values.astype(str).tolist())
+            data_to_compute[self.protected_att] = (data_to_compute[protected_att].values.astype(str).tolist())
+            data_to_compute[self.protected_att] = data_to_compute[self.protected_att].apply(lambda row: "_".join(row))
+
+            list_classes = data_to_compute[self.protected_att].unique()
+            for class_name in list_classes:
+                if ("nan" not in class_name) and ("not_in_" not in class_name):
+                    self.protected_class = class_name
+                    break
 
         methods_numerical = [CompleteCaseAnalysis, ModeImputer, MeanImputer, MedianImputer, DummyImputerNumerical, DataWigSimpleImputer]
         methods_categorical = [CompleteCaseAnalysis, ModeImputer, DummyImputerCategorical, DataWigSimpleImputer]
@@ -22,39 +42,113 @@ class MissingValueMethodDispatcher:
             # Here we need to instanciate the classes. We have to get the columns first.
             num_df = data.select_dtypes(include='number')
             cat_df = data.select_dtypes(exclude='number')
-            self.missing_value_handler_numerical = method_list[0](list(num_df.columns))
-            self.missing_value_handler_categorical = method_list[1](list(cat_df.columns))
+
+            if self.handle_protected:
+                # We need to create a class per protected class.
+                self.missing_value_handler_numerical = [method_list[0](list(num_df.columns)), method_list[0](list(num_df.columns))]
+                self.missing_value_handler_categorical = [method_list[1](list(cat_df.columns)), method_list[1](list(cat_df.columns))]
+            else:
+                self.missing_value_handler_numerical = method_list[0](list(num_df.columns))
+                self.missing_value_handler_categorical = method_list[1](list(cat_df.columns))
         
-        elif isinstance(method_list[0], tuple(methods_numerical)) and  isinstance(method_list[1], tuple(methods_categorical)):           
-            self.missing_value_handler_numerical = method_list[0]
-            self.missing_value_handler_categorical = method_list[1]
+        elif isinstance(method_list[0], tuple(methods_numerical)) and  isinstance(method_list[1], tuple(methods_categorical)):   
+            if self.handle_protected:
+                # We need to create a class per protected class.
+                self.missing_value_handler_numerical = [method_list[0], copy.deepcopy(method_list[0])]
+                self.missing_value_handler_categorical = [method_list[1], copy.deepcopy(method_list[1])]
+            else:        
+                self.missing_value_handler_numerical = method_list[0]
+                self.missing_value_handler_categorical = method_list[1]
 
         else:
             raise "Error: missing value method not applicable to given attributes."
 
     def name(self):
-        name_ = "numerical_categorical_dispatcher_" + self.missing_value_handler_numerical.name() + "_" + self.missing_value_handler_categorical.name()
+        if self.handle_protected:
+            name_ = "numerical_categorical_dispatcher_" + self.missing_value_handler_numerical[0].name() + "_" + self.missing_value_handler_categorical[0].name()
+        else:
+            name_ = "numerical_categorical_dispatcher_" + self.missing_value_handler_numerical.name() + "_" + self.missing_value_handler_categorical.name()
         return name_
 
     def fit(self, df):
-        num_df = df.select_dtypes(include='number')
-        cat_df = df.select_dtypes(exclude='number')
-        self.missing_value_handler_numerical.fit(num_df)
-        self.missing_value_handler_categorical.fit(cat_df)
+        if self.handle_protected:
+            # We need to separate the dataframe into protected and non protected rows.
+            df[self.protected_att] = (df[self.protected_att_list].values.astype(str).tolist())
+            df[self.protected_att] = df[self.protected_att].apply(lambda row: "_".join(row))
+
+            protected_df = df.loc[df[self.protected_att] == self.protected_class]
+            non_protected_df = df.loc[df[self.protected_att] != self.protected_class]
+
+            
+            protected_df.drop(columns=[self.protected_att], inplace=True)
+            non_protected_df.drop(columns=[self.protected_att], inplace=True)
+            df.drop(columns=[self.protected_att], inplace=True)
+
+            num_protected_df = protected_df.select_dtypes(include='number')
+            cat_protected_df = protected_df.select_dtypes(exclude='number')
+            num_non_protected_df = non_protected_df.select_dtypes(include='number')
+            cat_non_protected_df = non_protected_df.select_dtypes(exclude='number')
+
+            self.missing_value_handler_numerical[0].fit(num_protected_df)
+            self.missing_value_handler_numerical[1].fit(num_non_protected_df)
+            self.missing_value_handler_categorical[0].fit(cat_protected_df)
+            self.missing_value_handler_categorical[1].fit(cat_non_protected_df)
+
+        else:
+            num_df = df.select_dtypes(include='number')
+            cat_df = df.select_dtypes(exclude='number')
+            self.missing_value_handler_numerical.fit(num_df)
+            self.missing_value_handler_categorical.fit(cat_df)
 
     def handle_missing(self, df):
-        #print("DF shape", df.shape)
-        num_df = df.select_dtypes(include='number')
-        cat_df = df.select_dtypes(exclude='number')
-        #print("num DF shape", num_df.shape)
-        #print("cat DF shape", cat_df.shape)
-        imputed_num_df = self.missing_value_handler_numerical.handle_missing(num_df)
-        imputed_cat_df = self.missing_value_handler_categorical.handle_missing(cat_df)
-        #print("imp num DF shape", imputed_num_df.shape)
-        #print("imp cat DF shape", imputed_cat_df.shape)
-        #concat_result = pd.concat([imputed_num_df, imputed_cat_df], axis=1, join='inner')
-        #print(concat_result.shape)
-        return pd.concat([imputed_num_df, imputed_cat_df], axis=1, join='inner')
+        if self.handle_protected:
+            df[self.protected_att] = (df[self.protected_att_list].values.astype(str).tolist())
+            df[self.protected_att] = df[self.protected_att].apply(lambda row: "_".join(row))
+
+            # We need to separate the dataframe into protected and non protected rows.
+            protected_df = df.loc[df[self.protected_att] == self.protected_class]
+            non_protected_df = df.loc[df[self.protected_att] != self.protected_class]
+
+            
+            protected_df.drop(columns=[self.protected_att], inplace=True)
+            non_protected_df.drop(columns=[self.protected_att], inplace=True)
+            df.drop(columns=[self.protected_att], inplace=True)
+
+            num_protected_df = protected_df.select_dtypes(include='number')
+            cat_protected_df = protected_df.select_dtypes(exclude='number')
+            num_non_protected_df = non_protected_df.select_dtypes(include='number')
+            cat_non_protected_df = non_protected_df.select_dtypes(exclude='number')
+
+            imputed_num_protected_df = self.missing_value_handler_numerical[0].handle_missing(num_protected_df)
+            inputed_cat_protected_df = self.missing_value_handler_categorical[0].handle_missing(cat_protected_df)
+            imputed_num_non_protected_df = self.missing_value_handler_numerical[1].handle_missing(num_non_protected_df)
+            imputed_cat_non_protected_df = self.missing_value_handler_categorical[1].handle_missing(cat_non_protected_df)
+
+            # Merge all the imputed dataframes.
+            imputed_protected_df = pd.concat([imputed_num_protected_df, inputed_cat_protected_df], axis=1, join='inner')
+            imputed_non_protected_df = pd.concat([imputed_num_non_protected_df, imputed_cat_non_protected_df], axis=1, join='inner')
+            # Merge the protected and non protected dataframes.
+            imputed_df = pd.concat([imputed_protected_df, imputed_non_protected_df], axis=0)
+      
+            return imputed_df
+
+
+        else:
+            #print("DF shape", df.shape)
+            num_df = df.select_dtypes(include='number')
+            cat_df = df.select_dtypes(exclude='number')
+            #print("num DF shape", num_df.shape)
+            #print("cat DF shape", cat_df.shape)
+            imputed_num_df = self.missing_value_handler_numerical.handle_missing(num_df)
+            imputed_cat_df = self.missing_value_handler_categorical.handle_missing(cat_df)
+            #print("imp num DF shape", imputed_num_df.shape)
+            #print("imp cat DF shape", imputed_cat_df.shape)
+            #concat_result = pd.concat([imputed_num_df, imputed_cat_df], axis=1, join='inner')
+            #print(concat_result.shape)
+
+            imputed_df = pd.concat([imputed_num_df, imputed_cat_df], axis=1, join='inner')
+           
+            return imputed_df
 
 
 class MissingValueHandler:

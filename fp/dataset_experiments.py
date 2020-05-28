@@ -76,7 +76,7 @@ class AdultDatasetMaleExperiment(BinaryClassificationExperiment):
 
 class AdultDatasetWhiteExperiment(BinaryClassificationExperiment):
 
-    def __init__(self, fixed_random_seed, train_data_sampler, missing_value_handler, numeric_attribute_scaler,
+    def __init__(self, fixed_random_seed, train_data_sampler, missing_value_handler, missing_value_per_protected_class, numeric_attribute_scaler,
                  learners, pre_processors, post_processors):
 
         test_set_ratio = 0.2
@@ -94,6 +94,22 @@ class AdultDatasetWhiteExperiment(BinaryClassificationExperiment):
         privileged_groups = [{'race': 1}]
         unprivileged_groups = [{'race': 0}]
 
+
+        ############## Addition to handle evaluation based on protected attributes that might not be in training
+        self.missing_value_per_protected_class = missing_value_per_protected_class
+        """
+        protected_attributes=[("race", ["White"])]
+        self.protected_attributes = protected_attributes
+        ## Process protected attriutes for evaluation to binary attributes.
+        # We create new attributes just for evaluation.
+        privileged_groups = [{}]
+        protected_attribute_names = []
+        for eval_protected_attributes in protected_attributes:
+            protected_attribute_names += ["eval_" + eval_protected_attributes[0]]
+            privileged_groups[0]["eval_" + eval_protected_attributes[0]] = 1
+        """
+        #########################################################################################################
+
         dataset_metadata = {
             'label_maps': [{1.0: '>50K', 0.0: '<=50K'}],
             'protected_attribute_maps': [{1.0: 'White', 0.0: 'Non-white'}]
@@ -108,6 +124,16 @@ class AdultDatasetWhiteExperiment(BinaryClassificationExperiment):
     def load_raw_data(self):
         data = pd.read_csv('datasets/raw/adult.csv', na_values='?', sep=',')
         print(data.head())
+
+        """
+        # Transform the evaluation protected attributes into binary ones.
+        for protected_att, protected_class_list in self.protected_attributes:
+            # We create a new attribute with the binary values.
+            data.loc[data[protected_att].isin(protected_class_list), "eval_" + protected_att] = "_".join(protected_class_list)
+            data.loc[~data[protected_att].isin(protected_class_list), "eval_" + protected_att] = "not_in_" +  "_".join(protected_class_list)
+            data.loc[data[protected_att] == np.nan, "eval_" + protected_att ] = np.nan
+        """
+
         return data
         #return pd.read_csv('datasets/raw/adult.csv', na_values='?', sep=',')
 
@@ -346,7 +372,7 @@ class GiveMeSomeCreditExperiment(BinaryClassificationExperiment):
 
 class PSIDDataset(BinaryClassificationExperiment):
 
-    def __init__(self, fixed_random_seed, train_data_sampler, missing_value_handler, numeric_attribute_scaler, \
+    def __init__(self, fixed_random_seed, train_data_sampler, missing_value_handler, missing_value_per_protected_class, numeric_attribute_scaler, \
          learners, pre_processors, post_processors, \
          year="11", classification_target=("labels1", 5), protected_attributes=[("gender", ["woman"])], protected_attributes_for_classification=["gender", "age"]):
 
@@ -397,7 +423,7 @@ class PSIDDataset(BinaryClassificationExperiment):
             #for protected_class in eval_protected_attributes[1]:
             #    list_protected_classes += ("_" + protected_class)
             privileged_classes_concat += [list_protected_classes]
-            privileged_classes.append(eval_protected_attributes[1]) # += [list_protected_classes]
+            privileged_classes.append([list_protected_classes]) #eval_protected_attributes[1]) # += [list_protected_classes]
             privileged_groups[0]["eval_" + eval_protected_attributes[0]] = 1
 
         # Create the list of unpriviledged groups.
@@ -419,7 +445,17 @@ class PSIDDataset(BinaryClassificationExperiment):
 
         dataset_metadata = {
             'label_maps': [{1.0: positive_label, 0.0: self.negative_label}],
-            'protected_attribute_maps': [{1.0: class_name, 0.0: "Non-" + class_name} for class_name in privileged_classes_concat]
+            'protected_attribute_maps': [{1.0: class_name, 0.0: "not_in_" + class_name} for class_name in privileged_classes_concat]
+        }
+
+        #protected_attribute_names = ['race', 'sex']
+        #privileged_classes = [['White'], ['Male']]
+        #privileged_groups = [{'race': 1, 'sex': 1}]
+        #unprivileged_groups = [{'race': 1, 'sex': 0}, {'sex': 0}]  # TO THINK ABOUT
+
+        dataset_metadata = {
+            'label_maps': [{1.0: '>50K', 0.0: '<=50K'}],
+            'protected_attribute_maps': [{1.0: 'White', 0.0: 'Non-white'}, {1.0: 'Male', 0.0: 'Female'}]
         }
 
 
@@ -436,6 +472,9 @@ class PSIDDataset(BinaryClassificationExperiment):
                 categorical_attribute_names.append(att)
             else:
                 numeric_attribute_names.append(att)
+
+
+        self.missing_value_per_protected_class = missing_value_per_protected_class
 
         super().__init__(fixed_random_seed, test_set_ratio, validation_set_ratio, label_name, positive_label,
                          numeric_attribute_names, categorical_attribute_names, attributes_to_drop_names,
@@ -463,5 +502,6 @@ class PSIDDataset(BinaryClassificationExperiment):
             data.loc[~data[protected_att].isin(protected_class_list), "eval_" + protected_att] = "not_in_" +  "_".join(protected_class_list)
             data.loc[data[protected_att] == np.nan, "eval_" + protected_att ] = np.nan
         
-        print(data[self.label_name].value_counts(dropna=False))
+        #print(data[self.label_name].value_counts(dropna=False))
+        print(data["eval_sprace"].value_counts(dropna=False))
         return data
