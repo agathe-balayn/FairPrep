@@ -3,6 +3,9 @@ import pandas as pd
 import numpy as np
 import fp.data_utils as data_u
 from pathlib import Path
+from datetime import datetime
+from time import time
+import json
 
 
 class AdultDatasetWhiteMaleExperiment(BinaryClassificationExperiment):
@@ -453,10 +456,12 @@ class PSIDDataset(BinaryClassificationExperiment):
         #privileged_groups = [{'race': 1, 'sex': 1}]
         #unprivileged_groups = [{'race': 1, 'sex': 0}, {'sex': 0}]  # TO THINK ABOUT
 
+        """ # THIS HAS TO BE CHECKED> I just commented it out.
         dataset_metadata = {
             'label_maps': [{1.0: '>50K', 0.0: '<=50K'}],
             'protected_attribute_maps': [{1.0: 'White', 0.0: 'Non-white'}, {1.0: 'Male', 0.0: 'Female'}]
         }
+        """
 
 
         ### Handle all attributes used for classification.
@@ -504,4 +509,159 @@ class PSIDDataset(BinaryClassificationExperiment):
         
         #print(data[self.label_name].value_counts(dropna=False))
         print(data["eval_sprace"].value_counts(dropna=False))
+        return data
+
+
+
+
+import fp.synthetic_data_generator as sdGen
+
+class SyntheticDataset(BinaryClassificationExperiment):
+
+    def __init__(self, fixed_random_seed, train_data_sampler, missing_value_handler, missing_value_per_protected_class, numeric_attribute_scaler, \
+         learners, pre_processors, post_processors, \
+         data_existing_file=None,\
+         protected_attributes=[("x_sens_0", ["0"]), ("x_sens_1", ["0"])],\
+         protected_attributes_for_classification=["x_sens_0"],\
+         discri_factor_protected_features = [np.pi / 4, np.pi/2], correlation_feature_scores_protected_features = [[0.2,0.9]],\
+         add_random_features = 1, add_categorical_features = [2,1], \
+         nb_data=10000, mu1=[2,2], sigma1=[[5, 1], [1, 5]], mu2=[0,1], sigma2=[[10, 1], [1, 3]], plot_data=False,\
+         missing_value_injection=[None, None]): # Characteristics of the dataset to generate.
+
+        # Generate the dataset here.
+        if not data_existing_file:
+            X, y, x_control_list, x_correlated_list, x_uncorrelated_list, x_cat_uncorrelated_list, x_cat_correlated_list = sdGen.generate_synthetic_data(nb_data, mu1, sigma1,\
+                                                                      mu2, sigma2,\
+                                                                      discri_factor_protected_features,\
+                                                                      correlation_feature_scores_protected_features,\
+                                                                      add_random_features, add_categorical_features,\
+                                                                      plot_data)
+            data = sdGen.generate_synthetic_dataframe(X,y,x_control_list, x_correlated_list, x_uncorrelated_list, x_cat_uncorrelated_list, x_cat_correlated_list)
+            data['label'] = data['label'].apply(lambda x: "favorable" if x == 1 else 'unfavorable')
+            dictionary_sensitive_type = {"label":"str"}
+            data.astype(dictionary_sensitive_type)
+            data_file_root = "data_exp_" + datetime.fromtimestamp(time()).strftime('%Y-%m-%d_%H-%M-%S-%f')[:-3]
+            self.data_file = data_file_root 
+            data.to_csv(self.data_file + ".csv")
+            meta_data_dataset = {"protected_attributes": protected_attributes, "discri_factor_protected_features": discri_factor_protected_features, \
+                "correlation_feature_scores_protected_features":correlation_feature_scores_protected_features, "add_random_features":add_random_features,\
+                "add_categorical_features": add_categorical_features, "nb_data": nb_data, "mu1": mu1, "mu2":mu2, "sigma1":sigma1, "sigma2":sigma2,\
+                "missing_value_injection":missing_value_injection}
+            with open(data_file_root + '_meta_data.txt', 'w') as file:
+                json.dump(meta_data_dataset, file)
+
+        else:
+            self.data_file = data_existing_file
+            with open(data_existing_file, 'r') as file:
+                data = json.load(file)
+            with open(data_existing_file.replace(".csv", "_meta_data.txt"), 'r') as file:
+                meta_data = json.load(file)
+            protected_attributes = meta_data["protected_attributes"]
+
+            
+             
+
+        train_set_ratio = 0.9
+        validation_set_ratio = 0.1
+        label_name = "label"
+        #attributes_to_drop_names = ['year']
+
+        data_attributes = list(data.columns)
+
+        ### Handle labels' attributes.
+
+        # We define for now the classification task as: classification_target=(label_id, ratio). 
+        # The cell is positive when its value is "ratio" times higher than the mean of the attribute.
+        # Get average of the attribute.
+        #self.threshold_value = data[[classification_target[0]]].mean(axis=0)[classification_target[0]] * classification_target[1] 
+        positive_label = "favorable"
+        self.negative_label = "unfavorable"
+        
+
+        
+        ### Handle protected attributes.
+        self.protected_attributes = protected_attributes# [i for i in data_attributes if "x_sens_" in i]
+
+        ## Process protected attributes for evaluation to binary attributes.
+        # We create new attributes just for evaluation.
+        protected_attribute_names = []
+        privileged_classes = []
+        privileged_classes_concat = []
+        privileged_groups = [{}]
+        unprivileged_groups = []
+        for eval_protected_attributes in protected_attributes:
+            protected_attribute_names += ["eval_" + eval_protected_attributes[0]]
+            list_protected_classes = "_".join(eval_protected_attributes[1])
+            #for protected_class in eval_protected_attributes[1]:
+            #    list_protected_classes += ("_" + protected_class)
+            privileged_classes_concat += [list_protected_classes]
+            privileged_classes.append([list_protected_classes]) #eval_protected_attributes[1]) # += [list_protected_classes]
+            privileged_groups[0]["eval_" + eval_protected_attributes[0]] = 1
+
+        # Create the list of unpriviledged groups.
+        nb_protected_attributes = len(protected_attribute_names)
+        arr = [None] * nb_protected_attributes
+        list_combinations = []
+        list_combinations = data_u.generateAllBinaryStrings(nb_protected_attributes, arr, 0, list_combinations)
+        list_combinations.remove([1]*nb_protected_attributes)
+        for combi in list_combinations:
+            dict_to_append = {}
+            for protected_att, bit in zip(protected_attribute_names, combi):
+                dict_to_append[protected_att] = bit
+            unprivileged_groups.append(dict_to_append)
+
+        
+
+        dataset_metadata = {
+            'label_maps': [{1.0: positive_label, 0.0: self.negative_label}],
+            'protected_attribute_maps': [{1.0: class_name, 0.0: "not_in_" + class_name} for class_name in privileged_classes_concat]
+        }
+
+        
+        ### Handle all attributes used for classification.
+
+        numeric_attribute_names = ["x_0", "x_1"]
+        for element in data_attributes:
+            if (("x_corr_" in element) or ("x_uncorr_" in element)) and ("_cat" not in element):
+                numeric_attribute_names.append(element)
+     
+
+        categorical_attribute_names = []
+        for element in data_attributes:
+            if ("x_uncorr_cat" in element) or ("x_corr_cat" in element):
+                categorical_attribute_names.append(element)
+        categorical_attribute_names += protected_attributes_for_classification
+      
+
+        attributes_to_drop_names = []
+        for att in data_attributes:
+            if ("x_sens_" in att) and (att not in protected_attributes_for_classification):
+                attributes_to_drop_names.append(att)
+
+
+
+        self.missing_value_per_protected_class = missing_value_per_protected_class
+        self.missing_value_injection = missing_value_injection
+
+        super().__init__(fixed_random_seed, train_set_ratio, validation_set_ratio, label_name, positive_label,
+                         numeric_attribute_names, categorical_attribute_names, attributes_to_drop_names,
+                         train_data_sampler, missing_value_handler, numeric_attribute_scaler, learners, pre_processors,
+                         post_processors, protected_attribute_names,
+                         privileged_classes, privileged_groups, unprivileged_groups, dataset_metadata, 'synthetic_data' + "_".join(privileged_classes_concat))
+
+
+    def load_raw_data(self):
+        data = pd.read_csv(self.data_file + ".csv", na_values='', sep=',', index_col="Unnamed: 0")
+
+        ### Process the data according to what we need.
+      
+
+        # Transform the evaluation protected attributes into binary ones.
+        for protected_att, protected_class_list in self.protected_attributes:
+            # We create a new attribute with the binary values.
+            data.loc[data[protected_att].isin(protected_class_list), "eval_" + protected_att] = "_".join(protected_class_list)
+            data.loc[~data[protected_att].isin(protected_class_list), "eval_" + protected_att] = "not_in_" +  "_".join(protected_class_list)
+            data.loc[data[protected_att] == np.nan, "eval_" + protected_att ] = np.nan
+        
+        #print(data[self.label_name].value_counts(dropna=False))
         return data

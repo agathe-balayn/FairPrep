@@ -12,6 +12,7 @@ from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import train_test_split
 from fp.missingvalue_handlers import MissingValueMethodDispatcher
 from fp.datadistribution_observer import getDataErrorDistributions
+import fp.synthetic_data_generator as sdGen
 
 
 class BinaryClassificationExperiment:
@@ -19,7 +20,7 @@ class BinaryClassificationExperiment:
 
     def __init__(self,
                  fixed_random_seed,
-                 test_set_ratio,
+                 train_set_ratio,
                  validation_set_ratio,
                  label_name,
                  positive_label,
@@ -40,7 +41,7 @@ class BinaryClassificationExperiment:
                  dataset_name):
 
         self.fixed_random_seed = fixed_random_seed
-        self.test_set_ratio = test_set_ratio
+        self.train_set_ratio = train_set_ratio
         self.validation_set_ratio = validation_set_ratio
         self.label_name = label_name
         self.positive_label = positive_label
@@ -298,7 +299,7 @@ class BinaryClassificationExperiment:
 
         # Fetching the accuracy from the row('val', 'None', 'accuracy') of all the experiment results
         for result_filename in results_dir:
-            if "distribution" not in result_filename:
+            if ("distribution" not in result_filename) and ("data_exp" not in result_filename) and ("train_data" not in result_filename) and ("test_data" not in result_filename) and ("val_data" not in result_filename):
                 file_path = self.generate_file_path(result_filename)
                 result_df = pd.read_csv(file_path, header=None, names=['split', 'maybe_privileged', 'metric_name', 'metric_value'])
                 accuracy = (result_df.loc[(result_df['split'] == 'val') & 
@@ -343,10 +344,21 @@ class BinaryClassificationExperiment:
 
         data = self.load_raw_data()
 
-        all_train_data, test_and_validation_data = train_test_split(data, test_size=self.test_set_ratio +
-                                                                    self.validation_set_ratio,
+        train_and_validation_data, test_data = train_test_split(data, test_size=(1.0 - (self.train_set_ratio)), #+ self.validation_set_ratio,
                                                                     random_state=self.fixed_random_seed)
 
+
+
+        # Apply the missing value transformations here if needed!
+        if self.missing_value_injection[0]:
+            train_and_validation_data = sdGen.generate_synthetic_errors(train_and_validation_data, self.missing_value_injection[0])
+        if self.missing_value_injection[1]:
+            test_data = sdGen.generate_synthetic_errors(test_data, self.missing_value_injection[1])
+
+        second_split_ratio = 1 - (self.train_set_ratio / (self.train_set_ratio + self.validation_set_ratio))
+
+        train_data, validation_data = train_test_split(train_and_validation_data, test_size=second_split_ratio,
+                                                      random_state=self.fixed_random_seed)
         
         results_file_name_distri = '../{}{}-{}-{}.csv'.format(
             self.generate_file_path(), self.unique_file_name_before_exp(), self.fixed_random_seed, "raw_training_data_distribution")
@@ -354,10 +366,12 @@ class BinaryClassificationExperiment:
         results_dir_name = os.path.join(os.path.dirname(os.path.realpath(__file__)), '../{}'.format(self.generate_file_path()))
         if not os.path.exists(results_dir_name):
             os.makedirs(results_dir_name)
-        #with open(results_file_path, 'w') as results_file:
-        getDataErrorDistributions(all_train_data.copy(deep=True), self.protected_attribute_names, self.attributes_to_drop_names, self.privileged_groups, self.label_name, results_file_path_distri, ["missing_values"])
 
-        train_data = self.train_data_sampler.sample(all_train_data)
+
+        #with open(results_file_path, 'w') as results_file:
+        getDataErrorDistributions(train_data.copy(deep=True), self.protected_attribute_names, self.attributes_to_drop_names, self.privileged_groups, self.label_name, results_file_path_distri, ["missing_values"])
+
+        train_data = self.train_data_sampler.sample(train_data)
         #print(train_data["eval_sprace"].value_counts(dropna=False))
 
         results_file_name_distri = '../{}{}-{}-{}.csv'.format(
@@ -366,10 +380,14 @@ class BinaryClassificationExperiment:
         #with open(results_file_path, 'w') as results_file:
         getDataErrorDistributions(train_data, self.protected_attribute_names, self.attributes_to_drop_names, self.privileged_groups, self.label_name, results_file_path_distri,["missing_values"])
 
-        second_split_ratio = self.test_set_ratio / (self.test_set_ratio + self.validation_set_ratio)
-
-        validation_data, test_data = train_test_split(test_and_validation_data, test_size=second_split_ratio,
-                                                      random_state=self.fixed_random_seed)
+        
+        # Save the data.
+        train_data.to_csv(Path(results_dir_name + "/train_data.csv" ))
+        validation_data.to_csv(Path(results_dir_name + "/val_data.csv" ))
+        test_data.to_csv(Path(results_dir_name + "/test_data.csv" ))
+        # Moving the data file to the new folder.
+        os.rename(self.data_file + ".csv", Path(results_dir_name + "/" + self.data_file + ".csv"))
+        os.rename(self.data_file + "_meta_data.txt", Path(results_dir_name + "/" + self.data_file + "_meta_data.txt"))
 
         self.missing_value_handler = MissingValueMethodDispatcher(self.missing_value_handler_toprepare, train_data, self.missing_value_per_protected_class, self.protected_attribute_names)
         self.missing_value_handler.fit(train_data)

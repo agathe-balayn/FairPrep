@@ -22,11 +22,11 @@ def missingValuesDistribution(data_to_investigate, protected_attributes, attribu
 
     # Everything can be done if we save the data!
 
-    print("Handle save info.")
+    #print("Handle save info.")
 
 
 def getDataErrorDistributions(data, protected_attributes, attributes_to_drop_names, privileged_groups, label_name, results_file, list_error_types=["missing_values"]):
-    print("TODO")
+    #print("TODO")
     if "missing_values" in list_error_types:
         missingValuesDistribution(data, protected_attributes, attributes_to_drop_names, privileged_groups, label_name, results_file)
 

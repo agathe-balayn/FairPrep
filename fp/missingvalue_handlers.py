@@ -258,7 +258,7 @@ class DummyImputerNumerical(MissingValueHandler):
     def fit(self, df):
         for column in self.columns:
             values = np.array(df[column]).reshape(-1, 1)
-            self.imputers[column] = SimpleImputer(strategy='constant', fill_value="99999999").fit(values)
+            self.imputers[column] = SimpleImputer(strategy='constant', fill_value=99999999).fit(values)
 
     def handle_missing(self, df):
         imputed_df = df.copy(deep=True)
